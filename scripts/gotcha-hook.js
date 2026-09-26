@@ -25,8 +25,13 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const INDEX = process.env.GOTCHA_HOOK_INDEX ||
-  path.join(os.homedir(), 'gotcha-collector', 'hook-index.json');
+// The index is DATA, so it follows the data dir (or GOTCHA_HOME when overridden).
+const INDEX = process.env.GOTCHA_HOOK_INDEX || (function () {
+  if (process.env.GOTCHA_HOME) return path.join(process.env.GOTCHA_HOME, 'hook-index.json');
+  const xdg = process.env.XDG_DATA_HOME && path.isAbsolute(process.env.XDG_DATA_HOME)
+    ? process.env.XDG_DATA_HOME : path.join(os.homedir(), '.local', 'share');
+  return path.join(xdg, 'gotcha', 'hook-index.json');
+}());
 const MAX_FACTS = 3;
 
 function read(stream, cb) {

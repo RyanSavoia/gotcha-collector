@@ -20,7 +20,7 @@ const { execFileSync } = require('child_process');
 const path = require('path');
 const os = require('os');
 
-const GOTCHA = path.join(os.homedir(), 'gotcha-collector', 'bin', 'gotcha');
+const GOTCHA = path.join(__dirname, '..', 'bin', 'gotcha');
 const BUDGET_MS = 3000;
 
 function out(obj) { process.stdout.write(JSON.stringify(obj) + '\n'); process.exit(0); }
