@@ -1,0 +1,12 @@
+node_modules/
+# Nothing derived from a machine belongs here: this repo is the public mirror.
+candidates/
+disputed/
+drafts/
+*.log
+state.json
+hook-index.json
+DIGEST.md
+REVIEW.md
+config.json
+credentials.json

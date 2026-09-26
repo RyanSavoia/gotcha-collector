@@ -1,0 +1,30 @@
+{
+  "name": "gotcha-collector",
+  "version": "1.0.0",
+  "description": "Verified memory for AI coding agents: facts carry evidence and a runnable check, and claims whose checks fail are demoted to disproven.",
+  "keywords": ["ai", "agents", "memory", "claude", "claude-code", "cursor", "codex", "verification", "facts"],
+  "license": "MIT",
+  "bin": { "gotcha": "bin/gotcha" },
+  "main": "bin/gotcha",
+  "files": [
+    "bin/",
+    "lib/",
+    "scripts/gotcha-hook.js",
+    "scripts/gotcha-session-start.js",
+    "scripts/db-readonly.sh",
+    "scripts/release-check.js",
+    "README.md",
+    "DECISION.md",
+    "ATTRIBUTION.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "bash test/run.sh",
+    "release-check": "node scripts/release-check.js",
+    "prepublishOnly": "node scripts/release-check.js"
+  },
+  "engines": { "node": ">=14" },
+  "repository": { "type": "git", "url": "git+https://github.com/RyanSavoia/gotcha-collector.git" },
+  "bugs": { "url": "https://github.com/RyanSavoia/gotcha-collector/issues" },
+  "homepage": "https://github.com/RyanSavoia/gotcha-collector#readme"
+}

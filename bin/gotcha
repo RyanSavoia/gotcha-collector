@@ -1,0 +1,81 @@
+#!/usr/bin/env node
+'use strict';
+// gotcha -- verified memory for AI coding agents.
+// Facts carry evidence and a runnable check; checks are re-run; claims that fail
+// are demoted to `failed` so agents are warned off them.
+
+const { parseArgs } = require('../lib/util');
+
+const USAGE = `gotcha -- verified memory for AI coding agents
+
+  gotcha init      First run: config, schedules, hooks. Idempotent.
+  gotcha doctor    Check everything is wired; prints the fix for each problem.
+  gotcha uninstall Remove agents + hooks (--purge also deletes config/data).
+
+  gotcha verify    [repo-path] [--write] [--touch] [--root DIR] [--report FILE] [--github-action]
+                   Re-run every fact's check. --write demotes a verified claim whose
+                   check now fails to `+"`failed`"+` (disproven), recording the output.
+                   --touch also refreshes verified_at on facts that still pass.
+  gotcha audit     [repo-path...] [--out FILE] [--offline]
+                   Draft a facts.yaml for a new ecosystem, with checks where possible.
+  gotcha harvest   [--limit N] [--model M] [--dry-run]
+                   Mine agent transcripts for gotchas; draft candidate facts.
+  gotcha promote   [--max N] [--repo PATH]
+                   Run the three-level gauntlet over every eligible candidate and
+                   auto-promote what passes. No human approval in the normal path.
+                   'promote <id> --force' overrides the gauntlet for one candidate.
+  gotcha audit-claim <id> [--model M] [--no-db]
+                   Level 2 alone: a fresh examiner tries to DISPROVE the claim.
+  gotcha digest    Weekly one-screen digest -> DIGEST.md
+  gotcha map       url <host> | repo <name> | verify
+                   Answer relationship questions offline from repo-truth/topology.yaml.
+  gotcha hooks     install | index   Pre-action hooks that surface facts at act time.
+  gotcha impact    [--repo-name R --changed a,b | --github-action]
+                   Re-check only the facts whose evidence a change touches.
+  gotcha install   [repo-path]   Idempotent pointer blocks for Claude/Codex/Cursor.
+  gotcha preflight [repo-path]   Fast session-start reality check (<1s, <2KB).
+  gotcha status                  One-screen dashboard.
+
+Nothing is ever committed or pushed; every write is left for review.`;
+
+function main() {
+  const argv = process.argv.slice(2);
+  const cmd = argv[0];
+  const { positional, flags } = parseArgs(argv.slice(1));
+  const run = (mod) => require('../lib/commands/' + mod).run(positional, flags);
+  switch (cmd) {
+    case 'verify': return run('verify');
+    case 'install': return run('install');
+    case 'preflight': return run('preflight');
+    case 'status': return run('status');
+    case 'audit': return run('audit');
+    case 'harvest': return run('harvest');
+    case 'promote': return run('promote');
+    case 'audit-claim': return run('audit-claim');
+    case 'digest': return run('digest');
+    case 'impact': return run('impact');
+    case 'hooks': return run('hooks');
+    case 'map': return run('map');
+    case 'init': return run('init');
+    case 'doctor': return run('doctor');
+    case 'uninstall': return run('uninstall');
+    case '-h': case '--help': case 'help': case undefined:
+      console.log(USAGE); return 0;
+    case '-v': case '--version': case 'version':
+      console.log(require('../package.json').version); return 0;
+    default:
+      console.error('gotcha: unknown command ' + JSON.stringify(cmd) + '\n');
+      console.error(USAGE);
+      return 2;
+  }
+}
+
+// `init` is interactive and therefore async; everything else is sync. Awaiting a
+// non-promise is harmless, and NOT awaiting turned the exit code into a Promise.
+Promise.resolve()
+  .then(main)
+  .then((code) => { process.exitCode = code || 0; })
+  .catch((err) => {
+    console.error('gotcha: ' + (err && err.message ? err.message : String(err)));
+    process.exitCode = 2;
+  });
