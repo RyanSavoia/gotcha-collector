@@ -10,7 +10,6 @@
 set -uo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 GOTCHA="${GOTCHA_HOME:-$HOME/gotcha-collector}"
-ENV_FILE="${GOTCHA_DB_ENV:-$HOME/client-platform/api/.env}"
 LOG="$GOTCHA/logs/db-queries.log"
 TIMEOUT_MS="${GOTCHA_DB_TIMEOUT_MS:-15000}"
 
@@ -25,6 +24,21 @@ if printf '%s' "$SQL" | grep -qiE '\b(insert|update|delete|drop|alter|create|tru
   mkdir -p "$(dirname "$LOG")"
   printf '%s\tREFUSED\t%s\n' "$(date -u +%FT%TZ)" "$(printf '%s' "$SQL" | tr '\n' ' ' | cut -c1-500)" >> "$LOG"
   exit 3
+fi
+
+# Resolved only after the write screen: a mutating statement must be refused
+# whether or not a database is configured, or the refusal depends on setup.
+# No default: this used to point at the author's own `$HOME/client-platform/api/.env`,
+# a private repo name compiled into a shipped script. Set GOTCHA_DB_ENV, or
+# `db.envFile` in the gotcha config.
+ENV_FILE="${GOTCHA_DB_ENV:-}"
+if [[ -z $ENV_FILE ]]; then
+  ENV_FILE=$(node -e 'try{process.stdout.write((require(process.argv[1]+"/lib/config.js").load().db||{}).envFile||"")}catch(e){}' "$GOTCHA" 2>/dev/null || true)
+fi
+if [[ -z $ENV_FILE ]]; then
+  echo "db-readonly: no database env file configured." >&2
+  echo "  Set GOTCHA_DB_ENV=/path/to/.env, or db.envFile in the gotcha config." >&2
+  exit 2
 fi
 
 URL="$(node -e '

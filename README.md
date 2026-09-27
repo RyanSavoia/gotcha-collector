@@ -19,21 +19,42 @@ Memory with receipts.
 
 ## Install
 
-Zero dependencies, Node ≥ 14, macOS/Linux. Nothing runs in the background.
+Zero dependencies, Node ≥ 14, macOS/Linux. Nothing runs in the background until
+you ask for it.
 
 ```sh
-git clone <this repo> ~/gotcha-collector
-cd ~/gotcha-collector
-./bin/gotcha --help
-
-# optional: put it on PATH
-ln -s ~/gotcha-collector/bin/gotcha /usr/local/bin/gotcha
+npm install -g gotcha-collector
 ```
 
-Facts live **in the repos they describe**, at `<repo>/repo-truth/facts.yaml`.
-For this ecosystem the existing `~/user-dashboard/repo-truth/facts.yaml` stays the
-source of truth — gotcha reads and writes it in place and never relocates it,
-because it is already wired to a weekly GitHub Actions run.
+Or without npm:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/RyanSavoia/gotcha-collector/main/install.sh | sh
+```
+
+Or from source:
+
+```sh
+git clone https://github.com/RyanSavoia/gotcha-collector.git ~/gotcha-collector
+cd ~/gotcha-collector && ./bin/gotcha --help
+ln -s ~/gotcha-collector/bin/gotcha /usr/local/bin/gotcha   # optional
+```
+
+Then point it at your repos:
+
+```sh
+gotcha init --repo ~/your-repo          # records config, scaffolds repo-truth/
+gotcha install ~/your-repo              # pointer files so agents find the table
+gotcha doctor                           # confirm everything is wired
+```
+
+`gotcha init` writes `<repo>/repo-truth/verify.sh` and a seeded
+`facts.yaml` if the repo has none, and records which repos the verifier is
+written against. It never overwrites an existing table or verifier.
+
+Facts live **in the repos they describe**, at `<repo>/repo-truth/facts.yaml`, and
+gotcha reads and writes that file in place — it never relocates it. If you already
+have a fact table wired to CI, keep it where it is and point `--facts-repo` at it.
 
 ---
 
@@ -143,8 +164,8 @@ CI workflows and deploy configs, probes the hosts it finds, and drafts a `facts.
 where most facts already carry runnable checks.
 
 ```sh
-gotcha audit ~/user-dashboard ~/client-platform ~/ios-app \
-  --org The-Betting-Insider --out /tmp/draft.yaml
+gotcha audit ~/web ~/api ~/mobile \
+  --org your-github-org --out /tmp/draft.yaml
 ```
 
 Hosts are classified before probing: a domain counts as *yours* when the org

@@ -265,6 +265,176 @@ grep -q '0KB new content' <<<"$out2"; check $? "second harvest run finds zero ne
 out3=$(GOTCHA_TRANSCRIPT_ROOTS="codex=$TMP/does-not-exist" "$ROOT/bin/gotcha" harvest 2>&1)
 grep -q 'no codex transcripts' <<<"$out3"; check $? "a missing tool directory is skipped with a note"
 
+# --- a scaffolded repo must verify clean from the very first run ------------
+# A clean-account run reached a PROMOTE verdict and then rolled the whole batch
+# back: the only verify.sh in existence was the author's, hardcoding
+# `for repo in user-dashboard client-platform ios-app`. And the first empty table
+# tripped "SCHEMA-ERROR header: zero facts", because verify.sh requires a fact.
+mkdir -p "$TMP/scaffold/newrepo"
+( cd "$TMP/scaffold/newrepo" && git init -q && git -c user.email=a@b.c -c user.name=T commit -q --allow-empty -m seed ) >/dev/null 2>&1
+node -e '
+  require(process.argv[1] + "/lib/scaffold.js").ensure(process.argv[2], ["newrepo"]);
+' "$ROOT" "$TMP/scaffold/newrepo"
+( cd "$TMP/scaffold/newrepo" && git add -A && git -c user.email=a@b.c -c user.name=T commit -q -m scaffold ) >/dev/null 2>&1
+scaf=$(bash "$TMP/scaffold/newrepo/repo-truth/verify.sh" "$TMP/scaffold" 2>&1 | tail -1)
+[[ $scaf == "SUMMARY facts=1 verified_regressions=0" ]]; check $? "a freshly scaffolded repo-truth/ verifies clean"
+
+# The template must stay behaviourally identical to the verifier actually in use,
+# or installs quietly diverge from the repo they were modelled on.
+if [[ -f "$HOME/user-dashboard-main/repo-truth/verify.sh" ]]; then
+  diff <(sed 's/\$GOTCHA_ORPHAN_REPO/user-dashboard/g; s/for repo in \$GOTCHA_REPOS; do/for repo in user-dashboard client-platform ios-app; do/; s|/directory/containing/the/clones|/directory/containing/the/three/clones|' "$ROOT/lib/templates/verify.sh" \
+    | grep -v 'GOTCHA_REPOS=\|GOTCHA_ORPHAN_REPO=\|^# --- which clones\|^# Written by\|^# others under ROOT\|^# is the ONLY repo\|^# The repo the .orphans') \
+    "$HOME/user-dashboard-main/repo-truth/verify.sh" >/dev/null 2>&1
+  check $? "the scaffold template matches the verifier in use"
+else
+  echo "  SKIP template drift check (no reference verifier)"
+fi
+
+# --- every CLI flag must be declared value-taking or boolean ----------------
+# A flag missing from VALUE_FLAGS parses as `true` and its value is dropped.
+# Shipped three times, most memorably as `gh repo list true`.
+node "$ROOT/test/flag-audit.js" --check >/dev/null 2>&1
+check $? "every flag read in lib/ is declared in VALUE_FLAGS or BOOLEAN_FLAGS"
+
+# --- gotcha's own test debris must never become a fact ----------------------
+# "Queued test candidate number 3 with a runnable check" passed a mechanical
+# check, an independent sonnet examiner that CONFIRMED it, and the coherence
+# scan, and was written into facts.yaml. Every level asks "is this claim true?",
+# and a fixture's claim usually is -- so Level 0 asks a different question.
+mkdir -p "$TMP/synroot/somerepo"
+: > "$TMP/synroot/somerepo/present.txt"
+syn=$(node -e '
+  const g = require(process.argv[1] + "/lib/gauntlet.js");
+  const fact = {
+    id: "queued-candidate-7",
+    claim: "Queued test candidate number 7 with a runnable check.",
+    scope: ["somerepo"], evidence: ["somerepo/present.txt"],
+    check: "file 'somerepo/present.txt'\n",
+    status: "human-asserted", verified_at: "2026-09-26", source: "test fixture",
+  };
+  const r = g.runLevels(fact, { root: process.argv[2], here: process.argv[2], existing: [], cfg: {}, opts: {} });
+  console.log([r.outcome, r.level, r.synthetic ? "synthetic" : "-", (r.reasons || []).length].join("|"));
+' "$ROOT" "$TMP/synroot")
+[[ $syn == "disputed|0|synthetic|3" ]]; check $? "a synthetic candidate is quarantined at level 0, never promoted"
+
+# It must stop BEFORE the examiner: adjudicating fixtures costs real money.
+[[ $syn != *"promote"* ]]; check $? "a synthetic candidate never reaches promotion"
+
+# And the deliberate opt-in must still work, or legitimate test flows break.
+synok=$(node -e '
+  const s = require(process.argv[1] + "/lib/synthetic.js");
+  const base = { id: "queued-candidate-7", claim: "Queued test candidate number 7.", evidence: [] };
+  const blocked = s.detect(base).synthetic;
+  const allowed = s.detect(Object.assign({}, base, { synthetic_ok: "true" })).synthetic;
+  console.log(blocked + "|" + allowed);
+' "$ROOT")
+[[ $synok == "true|false" ]]; check $? "synthetic_ok: \"true\" lets a deliberate fixture through"
+
+# The guard is worthless if it flags real facts. Every fact in the live table
+# must pass clean.
+if [[ -f "$HOME/user-dashboard-main/repo-truth/facts.yaml" ]]; then
+  fp=$(node -e '
+    const s = require(process.argv[1] + "/lib/synthetic.js");
+    const facts = require(process.argv[1] + "/lib/facts.js");
+    const doc = facts.parse(require("fs").readFileSync(process.argv[2], "utf8"), { strict: false });
+    console.log(doc.facts.filter((f) => s.detect(f).synthetic).length);
+  ' "$ROOT" "$HOME/user-dashboard-main/repo-truth/facts.yaml")
+  [[ $fp == 0 ]]; check $? "the synthetic guard flags no real fact in the live table"
+else
+  echo "  SKIP synthetic false-positive sweep (no live fact table)"
+fi
+
+# --- every line of a multi-line check must gate the result ------------------
+# `eval "$body"` returns only the LAST line's status. Without `set -e` a five-line
+# check was a one-line check with four comments: earlier assertions printed their
+# failure and were discarded. Found by mutating the exact line a check existed to
+# catch and watching the fact still pass.
+# Check paths are repo-prefixed, as every real check is.
+mkdir -p "$TMP/checkroot/somerepo"
+: > "$TMP/checkroot/somerepo/present.txt"
+runbody() {
+  node -e 'console.log(require(process.argv[1] + "/lib/checks.js").runCheck(process.argv[3], { root: process.argv[2], here: process.argv[2] }).rc)' \
+    "$ROOT" "$TMP/checkroot" "$1"
+}
+multi=$(runbody "missing 'somerepo/gone.txt'
+file 'somerepo/present.txt'
+")
+[[ $multi == 0 ]]; check $? "a multi-line check passes when every line passes"
+multi2=$(runbody "file 'somerepo/nothere.txt'
+file 'somerepo/present.txt'
+")
+[[ $multi2 != 0 ]]; check $? "a FAILING first line fails the whole check, not just the last line"
+
+# --- extraction failure must HOLD watermarks --------------------------------
+# The bug this guards: launchd runs with a bare PATH, so `claude` was unfindable and
+# every chunk died with ENOENT. The harvester counted each failure as "0 candidates",
+# advanced the watermarks, and looked healthy. Fifteen ticks consumed real transcript
+# content and extracted nothing from it.
+mkdir -p "$TMP/tx-infra"
+{
+  printf '%s\n' '{"role":"assistant","message":{"content":[{"type":"text","text":"api-routes is dead, so I will ignore it."}]}}'
+  printf '%s\n' '{"role":"user","message":{"content":[{"type":"text","text":"<user_query>no, that is wrong, api-routes is actually live</user_query>"}]}}'
+  printf '%s\n' '{"role":"assistant","message":{"content":[{"type":"text","text":"Understood, api-routes is deployed and serving."}]}}'
+} > "$TMP/tx-infra/s.jsonl"
+# Zero the isolated budget first: a run that defers on budget never reaches the
+# extractor, so it would pass this test without exercising anything.
+node -e 'require(process.argv[1]+"/lib/state.js").patch({budget:{}})' "$ROOT"
+wm_before=$(node -e 'console.log(JSON.stringify(require(process.argv[1]+"/lib/state.js").read().transcripts||{}))' "$ROOT")
+infra_out=$(GOTCHA_EXTRACTOR_BIN=/nonexistent/claude \
+  GOTCHA_TRANSCRIPT_ROOTS="cursor=$TMP/tx-infra" "$ROOT/bin/gotcha" harvest 2>&1)
+wm_after=$(node -e 'console.log(JSON.stringify(require(process.argv[1]+"/lib/state.js").read().transcripts||{}))' "$ROOT")
+[[ $wm_before == "$wm_after" ]]; check $? "a failed extractor does NOT advance transcript watermarks"
+grep -q 'EXTRACTION FAILED' <<<"$infra_out"; check $? "a failed extractor logs loudly"
+grep -q 'watermarks NOT advanced' <<<"$infra_out"; check $? "a failed extractor says the watermarks were held"
+
+# --- the extractor binary is resolved, never inherited from PATH ------------
+# `which claude` succeeds in the owner's shell and fails under launchd, so the
+# resolver must find it by absolute path, not by PATH lookup.
+resolved=$(node -e 'console.log(require(process.argv[1]+"/lib/extractor.js").discover() || "")' "$ROOT")
+[[ -n $resolved && -x $resolved ]]; check $? "the extractor binary resolves to an absolute executable path"
+
+# --- a barren tick run is reported as unhealthy, not quiet ------------------
+health=$(GOTCHA_EXTRACTOR_BIN=/nonexistent/claude \
+  GOTCHA_TRANSCRIPT_ROOTS="cursor=$TMP/tx-infra" "$ROOT/bin/gotcha" status 2>&1)
+grep -q 'ATTENTION' <<<"$health"; check $? "status flags ticks that find lessons but extract none"
+
+# --- discovery mining must not blow up the prefilter ------------------------
+# Discoveries were added because the day's two best lessons were findings, not
+# corrections. But discovery language is common, and every extra window is a chunk
+# someone pays for, so the agreed ceiling is roughly double.
+node "$ROOT/test/cue-growth.js" --check >/dev/null 2>&1
+check $? "discovery cues keep prefilter growth under the agreed ceiling"
+
+# --- an unknown transcript tool name is an error, not silence ---------------
+# `claude=` instead of `claude-code=` read every file, normalized zero turns, and
+# reported "0 correction-shaped exchange(s)" as if the transcripts held no lessons.
+unknown=$(GOTCHA_TRANSCRIPT_ROOTS="claude=$TMP/tx-infra" "$ROOT/bin/gotcha" harvest 2>&1)
+grep -q 'unknown tool' <<<"$unknown"; check $? "an unknown transcript tool name fails loudly"
+
+# --- matcher regression: a real session must not be buried in facts ---------
+# The matcher's failure mode is invisible per-call -- every fact it surfaced was
+# genuinely anchored to a touched file. It only shows up over a whole session, so
+# the guard is a replay of one: test/fixtures/tracked-picks-session.json.
+if [[ -f "$HOME/.local/share/gotcha/hook-index.json" || -n ${GOTCHA_HOOK_INDEX:-} ]]; then
+  node "$ROOT/test/replay.js" --check >/dev/null 2>&1
+  check $? "session replay: no fact repeats, generic anchors stay quiet"
+else
+  echo "  SKIP session replay (no hook index built)"
+fi
+
+# --- once-per-session dedupe -------------------------------------------------
+dedupe=$(GOTCHA_SEEN_DIR="$TMP/seen" node -e '
+  const seen = require(process.argv[1] + "/lib/seen.js");
+  const h = [{ f: { id: "a", status: "verified" } }];
+  const first  = seen.filter("sess-1", h).length;
+  const second = seen.filter("sess-1", h).length;
+  const changed = seen.filter("sess-1", [{ f: { id: "a", status: "failed" } }]).length;
+  const again   = seen.filter("sess-1", [{ f: { id: "a", status: "failed" } }]).length;
+  const other   = seen.filter("sess-2", h).length;
+  console.log([first, second, changed, again, other].join(","));
+' "$ROOT")
+[[ $dedupe == "1,0,1,0,1" ]]; check $? "a fact fires once per session, re-fires once on status change"
+
 echo ""
 echo "  $pass passed, $fail failed"
 [[ $fail == 0 ]]

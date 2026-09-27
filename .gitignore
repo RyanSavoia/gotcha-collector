@@ -1,12 +1,7 @@
 node_modules/
-# Nothing derived from a machine belongs here: this repo is the public mirror.
-candidates/
-disputed/
-drafts/
-*.log
-state.json
-hook-index.json
-DIGEST.md
-REVIEW.md
-config.json
-credentials.json
+harvest.log
+*.tmp.*
+
+# Working artifacts (candidates/, drafts/, state.json, REVIEW.md) are deliberately
+# TRACKED: the review queue and harvest offsets are the project's state, and losing
+# them means re-reviewing work that was already triaged.

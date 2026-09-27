@@ -25,6 +25,11 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+// Both live next to this script under the install root, so a hook installed by
+// `gotcha hooks install` keeps working regardless of cwd.
+const relevance = require(path.join(__dirname, '..', 'lib', 'relevance.js'));
+const seen = require(path.join(__dirname, '..', 'lib', 'seen.js'));
+
 // The index is DATA, so it follows the data dir (or GOTCHA_HOME when overridden).
 const INDEX = process.env.GOTCHA_HOOK_INDEX || (function () {
   if (process.env.GOTCHA_HOME) return path.join(process.env.GOTCHA_HOME, 'hook-index.json');
@@ -32,7 +37,6 @@ const INDEX = process.env.GOTCHA_HOOK_INDEX || (function () {
     ? process.env.XDG_DATA_HOME : path.join(os.homedir(), '.local', 'share');
   return path.join(xdg, 'gotcha', 'hook-index.json');
 }());
-const MAX_FACTS = 3;
 
 function read(stream, cb) {
   let data = '';
@@ -64,33 +68,22 @@ read(process.stdin, (raw) => {
   try { idx = JSON.parse(fs.readFileSync(INDEX, 'utf8')); } catch (e) { return allow(); }
   if (!idx || !Array.isArray(idx.facts)) return allow();
 
-  const hay = subject.toLowerCase();
-  const hits = [];
-  for (const f of idx.facts) {
-    let why = null;
-    for (const a of f.anchors) {
-      if (hay.indexOf(a.toLowerCase()) !== -1) { why = a; break; }
-    }
-    if (!why) {
-      for (const b of f.bases) {
-        // Basenames are short; require a distinctive one to avoid matching "index.ts".
-        if (b.length >= 8 && hay.indexOf(b.toLowerCase()) !== -1) { why = b; break; }
-      }
-    }
-    if (why) hits.push({ f, why });
-    if (hits.length >= 12) break;
-  }
-  if (!hits.length) return allow();
+  // Match on what the task is ABOUT, not on which files it happens to name.
+  // relevance.rank() weights distinctive tokens, ignores generic anchors like
+  // page.tsx, and returns at most three.
+  let shown = relevance.rank(idx.facts, subject);
+  if (!shown.length) return allow();
 
-  // A disproven claim is the most valuable thing to surface, then enforced ones.
-  const rank = (h) => (h.f.status === 'failed' ? 0 : h.f.enforce ? 1 : 2);
-  hits.sort((a, b) => rank(a) - rank(b));
-  const shown = hits.slice(0, MAX_FACTS);
+  // Each fact speaks once per session (a status change buys one more turn).
+  const sessionId = payload.session_id || payload.sessionId ||
+    payload.conversation_id || process.env.CLAUDE_SESSION_ID || '';
+  if (sessionId) shown = seen.filter(sessionId, shown);
+  if (!shown.length) return allow();
 
   const lines = shown.map((h) => {
     const tag = h.f.status === 'failed' ? 'DISPROVEN fact' : 'Relevant verified fact';
     return tag + ': ' + h.f.claim +
-      ' (status ' + h.f.status + ', verified ' + h.f.verified_at + '). Evidence: ' + h.why + '.';
+      ' (status ' + h.f.status + ', verified ' + h.f.verified_at + '). Matched on ' + h.why + '.';
   });
 
   // Enforcement is opt-in per fact, shell commands only, and never for a fact that

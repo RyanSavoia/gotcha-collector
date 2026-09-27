@@ -32,7 +32,27 @@ function packedFiles() {
   return (j[0] && j[0].files ? j[0].files : []).map((f) => f.path);
 }
 
-const files = packedFiles();
+/** Every file under a directory, relative to it. For gating a mirror payload. */
+function dirFiles(dir) {
+  const out = [];
+  (function walk(d, rel) {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      if (e.name === '.git') continue;
+      const p = path.join(d, e.name);
+      const r = rel ? rel + '/' + e.name : e.name;
+      if (e.isDirectory()) walk(p, r);
+      else out.push(r);
+    }
+  }(dir, ''));
+  return out;
+}
+
+// --dir <path> gates an arbitrary tree (the public mirror payload) instead of the
+// npm tarball. Same rules either way -- there is no second, weaker standard for
+// the thing that goes on GitHub.
+const dirFlag = process.argv.indexOf('--dir');
+const SCAN_ROOT = dirFlag !== -1 ? path.resolve(process.argv[dirFlag + 1]) : ROOT;
+const files = dirFlag !== -1 ? dirFiles(SCAN_ROOT) : packedFiles();
 const violations = [];
 const warnings = [];
 
@@ -40,7 +60,7 @@ for (const f of files) {
   if (FORBIDDEN.some((re) => re.test(f))) { violations.push([f, 'forbidden path']); continue; }
   if (CONTENT_EXEMPT.some((re) => re.test(f))) continue;
   let text = '';
-  try { text = fs.readFileSync(path.join(ROOT, f), 'utf8'); } catch (e) { continue; }
+  try { text = fs.readFileSync(path.join(SCAN_ROOT, f), 'utf8'); } catch (e) { continue; }
   // Strict: actual credential material blocks. The broad scrubbing patterns also
   // match template text like "x-access-token:%s", which must not fail a release.
   if (redact.looksSecretStrict(text)) { violations.push([f, 'contains credential material']); continue; }
@@ -51,7 +71,8 @@ for (const f of files) {
   }
 }
 
-console.log('release-check: ' + files.length + ' file(s) in the package');
+console.log('release-check: ' + files.length + ' file(s) in ' +
+  (dirFlag !== -1 ? SCAN_ROOT : 'the npm package'));
 for (const [f, why] of warnings) console.log('  note     ' + f + '  (' + why + ')');
 if (!violations.length) { console.log('  clean — no facts, transcripts, state, logs, credentials, or machine paths'); process.exit(0); }
 console.log('');
